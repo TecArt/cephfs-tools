@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+################################################################################
+#
+# Tool to create snapshots inside of CephFS mounts including rotation
+#
+################################################################################
+
+NOACT=0
+NAME=$(basename $0|sed 's/\(\..*\)$//')
+VERSION="0.1"
+
+# Set the defaults
+: ${VERBOSE:=0}
+: ${LOGFILE:="/var/log/${NAME}.log"}
+: ${NOACT:=0}
+: ${SNAPTAG:=manual}
+: ${MAXSNAPS:=7}
+
+HOSTNAME=`hostname -s`
+function version() {
+    cat <<EOF >&2
+$NAME - $VERSION
+EOF
+}
+
+function copyright(){
+    version
+    cat << EOCOPYRIGHT >&2
+MIT License
+
+Copyright (c) 2020 TecArt GmbH
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+EOCOPYRIGHT
+}
+
+function usage() {
+    cat <<EOUSAGE >&2
+Usage: $NAME [OPTIONS] DIRS...
+
+OPTION      DESCRIPTION
+==========  ==================================================================
+-t          Snapshot tag (Default: ${SNAPTAG})
+-c          Maximum number of Snapshots for this tag (Default: ${MAXSNAPS})
+-l FILE     Log file path (Default: ${LOG_FILE})
+-n          No Act (and Verbose)
+-q          Quiet
+-v          Verbose
+-V          Version
+-w          Copyright and Warranty information
+-h          This text
+EOUSAGE
+}
+
+# Log to the logfile
+function log() {
+    echo "$(date +%Y%m%d.%H%M%S) [$NAME:$$] $@" >> ${LOGFILE}
+}
+
+# Echo the message if verbose and return 1, else return 0
+function verbose() {
+    log "[INFO] $@"
+    if [[ ${VERBOSE} -gt 0 ]] ; then
+	echo $@ >&2
+	return 1
+    fi
+    return 0
+}
+
+function error() {
+    log "[ERROR] $@"
+    echo -e "\033[0;31m[Error]\033[0m $@" >&2
+}
+
+function warning() {
+    log "[WARNING] $@"
+    echo -e "\033[1;33m[Error]\033[0m $@" >&2
+}
+
+#################################################################################
+# Main body
+# Parse options
+while getopts ":u:p:t:c:hnqwv" opt; do
+	case $opt in
+	    t) SNAPTAG=${OPTARG} ;;
+	    c) MAXSNAPS=${OPTARG} ;;
+	    h) usage; exit 0;;
+	    n) NOACT=1; VERBOSE=1 ;;
+	    q) VERBOSE=0 ;;
+	    v) VERBOSE=$(($VERBOSE+1)) ;;
+	    V) version ; exit 0;;
+	    w) copyright; exit 0;;
+	    :) error "Option -${OPTARG} requires an argument." ; exit 1 ;;
+	    \?) usage "Invalid option -${OPTARG}" ; exit 1;;
+	esac
+done
+shift $((OPTIND-1))
+
+# Customize to required arguments
+if [[ $# -lt 1 ]] ; then
+    error "You must specify at least one argument."
+    exit 2
+fi
+
+verbose "Calling $0 with $@"
+
+for SNAPDIR in $@;
+do
+    if [ ! -d $SNAPDIR ]
+    then
+	error "$SNAPDIR is not a directory"
+	exit 3
+    fi
+done
+
+for SNAPDIR in $@;
+do
+    verbose "Creating snapshot in ${SNAPDIR} with tag ${SNAPTAG} with max snaps ${MAXSNAPS}"
+
+    snapname="${SNAPTAG}-$(date "+%Y-%m-%d-%H-%M-%S")"
+
+    pushd "$SNAPDIR/.snap" >/dev/null
+    if [ $(ls -1 | wc -l) -ge 100 ]
+    then
+	warning "Max snapshots per directory reached"
+        exit 1
+    fi
+
+    # creates the snapshot
+    mkdir "$snapname"
+
+    # delete old snapshots if necessary
+    if [ $(ls -c1r | grep -E "^${SNAPTAG}-" | wc -l) -ge "${MAXSNAPS}" ]
+    then
+        for deldir in $(ls -c1r | grep -E "^${SNAPTAG}-" | head -n -${MAXSNAPS})
+        do
+            echo rmdir "$deldir"
+            verbose "Removing snapshot ${deldir}"
+            rmdir "${deldir}"
+        done
+    fi
+
+    popd >/dev/null
+done
+
