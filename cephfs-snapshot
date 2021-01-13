@@ -58,7 +58,7 @@ OPTION      DESCRIPTION
 ==========  ==================================================================
 -t          Snapshot tag (Default: ${SNAPTAG})
 -c          Maximum number of Snapshots for this tag (Default: ${MAXSNAPS})
--l FILE     Log file path (Default: ${LOG_FILE})
+-l FILE     Log file path (Default: ${LOGFILE})
 -n          No Act (and Verbose)
 -q          Quiet
 -v          Verbose
